@@ -36,4 +36,20 @@ def root() -> RedirectResponse:
 
 @app.get("/health", tags=["Sistema"])
 def health() -> dict:
-    return {"status": "ok"}
+    from app.db import DB_PATH
+    return {
+        "status": "ok",
+        "db": str(DB_PATH),
+        "db_found": DB_PATH.exists(),
+    }
+
+
+@app.on_event("startup")
+async def startup_check() -> None:
+    from app.db import DB_PATH
+    import logging
+    if not DB_PATH.exists():
+        logging.warning(
+            "DATABASE NON TROVATO: %s — "
+            "esegui scripts/ingest.py prima di usare l'API", DB_PATH
+        )

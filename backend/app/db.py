@@ -24,6 +24,15 @@ def _make_connection(path: str | Path = DB_PATH) -> sqlite3.Connection:
 
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     """FastAPI dependency — yields one SQLite connection per request."""
+    if not DB_PATH.exists():
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Database non trovato: {DB_PATH}. "
+                "Esegui prima: python scripts/ingest.py"
+            ),
+        )
     con = _make_connection()
     try:
         yield con
