@@ -89,13 +89,12 @@ def strip_columns(df: pd.DataFrame) -> pd.DataFrame:
 def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
     """Return the first column name from *candidates* that exists in *df*.
 
-    Comparison is done after stripping whitespace from both the DataFrame
-    column names and the candidate strings, so minor spacing differences
-    in the source CSV are tolerated.
+    Comparison is case-insensitive and strips whitespace, so minor
+    capitalisation/spacing differences in the source CSV are tolerated.
     """
-    stripped_map = {c.strip(): c for c in df.columns}
+    stripped_map = {c.strip().lower(): c for c in df.columns}
     for candidate in candidates:
-        match = stripped_map.get(candidate.strip())
+        match = stripped_map.get(candidate.strip().lower())
         if match is not None:
             return match
     return None
@@ -126,13 +125,13 @@ print(f"  ANAG_CLIENTI columns found: {list(raw_clients.columns)}")
 
 # "Ragione Sociale" column name varies widely across Italian ERP exports.
 rag_col = find_column(raw_clients, [
+    # Confirmed real column name (case-insensitive match handles capitalisation)
+    "Ragsoc",
     # Gamma Enterprise variants
     "Rag. Sociale", "Rag.Sociale", "Rag Sociale", "Descrcli", "Descr.cli",
     # Generic Italian ERP
-    "Ragione Sociale", "Ragione sociale", "RagSociale", "RagSoc", "Ragsoc",
+    "Ragione Sociale", "RagSociale", "RagSoc",
     "Denominazione", "Nome/Rag.Soc.", "Descr. Cli.", "Descr.Cli",
-    # Lowercase
-    "rag. sociale", "rag.sociale", "ragione sociale", "denominazione",
 ])
 
 # Last resort: if no candidate matched, look for any unmapped column whose
