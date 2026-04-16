@@ -124,12 +124,37 @@ raw_clients = read_italian_csv(raw_files["ANAG_CLIENTI"])
 strip_columns(raw_clients)
 print(f"  ANAG_CLIENTI columns found: {list(raw_clients.columns)}")
 
-# "Ragione Sociale" column name varies across Excel versions — try all known forms.
+# "Ragione Sociale" column name varies widely across Italian ERP exports.
 rag_col = find_column(raw_clients, [
-    "Rag. Sociale", "Rag.Sociale", "Rag Sociale",
-    "Ragione Sociale", "RagSociale", "Ragione sociale",
-    "rag. sociale", "rag.sociale",
+    # Gamma Enterprise variants
+    "Rag. Sociale", "Rag.Sociale", "Rag Sociale", "Descrcli", "Descr.cli",
+    # Generic Italian ERP
+    "Ragione Sociale", "Ragione sociale", "RagSociale", "RagSoc", "Ragsoc",
+    "Denominazione", "Nome/Rag.Soc.", "Descr. Cli.", "Descr.Cli",
+    # Lowercase
+    "rag. sociale", "rag.sociale", "ragione sociale", "denominazione",
 ])
+
+# Last resort: if no candidate matched, look for any unmapped column whose
+# values are long strings — almost certainly the company name field.
+_already_mapped = {"Codcli", "Descrtipcli", "Descrfil", "Potenziale",
+                   "Numdip", "Provincia", "Descrage", "Città", "Citta", "City"}
+if rag_col is None:
+    for col in raw_clients.columns:
+        if col in _already_mapped:
+            continue
+        sample = raw_clients[col].dropna().head(20)
+        if len(sample) == 0:
+            continue
+        avg_len = sample.astype(str).str.len().mean()
+        if avg_len >= 8:  # company names are typically ≥ 8 chars
+            rag_col = col
+            warn(
+                f"Auto-detected 'Rag. Sociale' as column '{col}' "
+                f"(avg value length {avg_len:.1f}). "
+                f"Verify sample: {sample.head(3).tolist()}"
+            )
+            break
 _client_rename: dict[str, str] = {
     "Codcli":      "client_code",
     "Descrtipcli": "client_type",
