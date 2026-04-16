@@ -4,19 +4,34 @@ Marchiol Pricing Cockpit — FastAPI application.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from app.api import catalog, clients, pricing
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.db import DB_PATH
+    import logging
+    if not DB_PATH.exists():
+        logging.warning(
+            "DATABASE NON TROVATO: %s — esegui scripts/ingest.py", DB_PATH
+        )
+    yield
+
+
 app = FastAPI(
     title="Marchiol Pricing Cockpit",
-    description="API per la raccomandazione sconti — prototipo M1",
+    description="API per la raccomandazione sconti — prototipo",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
-# Allow all origins for the workshop prototype
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,13 +58,3 @@ def health() -> dict:
         "db_found": DB_PATH.exists(),
     }
 
-
-@app.on_event("startup")
-async def startup_check() -> None:
-    from app.db import DB_PATH
-    import logging
-    if not DB_PATH.exists():
-        logging.warning(
-            "DATABASE NON TROVATO: %s — "
-            "esegui scripts/ingest.py prima di usare l'API", DB_PATH
-        )
