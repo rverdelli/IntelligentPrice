@@ -1,4 +1,4 @@
-.PHONY: install ingest backend test clean
+.PHONY: install ingest backend frontend test clean
 
 # ── Install dependencies ───────────────────────────────────────────────────────
 install:
@@ -19,6 +19,10 @@ ingest:
 # ── Backend server ─────────────────────────────────────────────────────────────
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# ── Frontend server ────────────────────────────────────────────────────────────
+frontend:
+	cd frontend && pnpm run dev
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 test:
