@@ -33,15 +33,25 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def read_italian_csv(path: Path, **kwargs) -> pd.DataFrame:
-    """Read a semicolon-delimited Italian CSV (comma decimals, UTF-8 BOM)."""
-    return pd.read_csv(
-        path,
-        sep=";",
-        decimal=",",
-        encoding="utf-8-sig",
-        dtype=str,          # read everything as str first — we cast below
-        **kwargs,
-    )
+    """Read a semicolon-delimited Italian CSV (comma decimals).
+
+    Tries encodings in order: utf-8-sig → cp1252 → latin-1.
+    Italian Excel exports are often cp1252 (e.g. 'n° promo' contains 0xb0).
+    """
+    for enc in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            df = pd.read_csv(
+                path,
+                sep=";",
+                decimal=",",
+                encoding=enc,
+                dtype=str,
+                **kwargs,
+            )
+            return df
+        except (UnicodeDecodeError, Exception):
+            continue
+    raise ValueError(f"Impossibile leggere {path}: encoding non riconosciuto")
 
 
 def to_float(series: pd.Series) -> pd.Series:
