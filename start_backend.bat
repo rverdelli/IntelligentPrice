@@ -1,4 +1,5 @@
 @echo off
+setlocal
 cd /d "%~dp0"
 
 echo ==========================================
@@ -6,47 +7,67 @@ echo  Marchiol Pricing Cockpit
 echo ==========================================
 echo.
 
-REM ── Backend ──────────────────────────────
-echo [Backend] Avvio su http://localhost:8000 ...
+REM ── Verifica prerequisiti ────────────────
+where python >nul 2>&1
+if errorlevel 1 (
+    echo ERRORE: Python non trovato. Installa da https://python.org
+    pause & exit /b 1
+)
+where node >nul 2>&1
+if errorlevel 1 (
+    echo ERRORE: Node.js non trovato. Installa da https://nodejs.org
+    pause & exit /b 1
+)
+
+REM ── BACKEND ──────────────────────────────
+echo [Backend] Controllo dipendenze...
 cd backend
 
 if not exist ".venv" (
-    echo     Installazione dipendenze backend...
-    where uv >nul 2>&1
-    if %errorlevel% == 0 (
-        uv sync --extra test
-    ) else (
-        python -m venv .venv
-        call .venv\Scripts\activate.bat
-        pip install -r requirements.txt
-        goto start_backend
-    )
+    echo   Creazione virtual environment...
+    python -m venv .venv
+    echo   Installazione pacchetti ^(prima volta, aspetta^)...
+    call .venv\Scripts\activate.bat
+    pip install -r requirements.txt --quiet
+) else (
+    call .venv\Scripts\activate.bat
 )
-call .venv\Scripts\activate.bat
 
-:start_backend
-start "Marchiol Backend" cmd /k "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+REM Ingest DB se non esiste
+if not exist "..\data\marchiol.db" (
+    echo   Creazione database da CSV...
+    python ..\scripts\ingest.py --db ..\data\marchiol.db --raw ..\data\raw
+)
+
+echo   Avvio API su http://localhost:8000 ...
+start "Marchiol Backend :8000" cmd /k "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 cd ..
 
-REM ── Frontend ─────────────────────────────
-echo [Frontend] Avvio su http://localhost:3000 ...
+REM ── FRONTEND ─────────────────────────────
+echo [Frontend] Controllo dipendenze...
 cd frontend
 
 if not exist "node_modules" (
-    echo     Installazione dipendenze frontend...
-    pnpm install
+    echo   Installazione pacchetti npm ^(prima volta, aspetta^)...
+    where pnpm >nul 2>&1 && pnpm install || npm install
 )
 
-start "Marchiol Frontend" cmd /k "pnpm run dev"
+echo   Avvio UI su http://localhost:3000 ...
+where pnpm >nul 2>&1 && (
+    start "Marchiol Frontend :3000" cmd /k "cd /d "%~dp0frontend" && pnpm run dev"
+) || (
+    start "Marchiol Frontend :3000" cmd /k "cd /d "%~dp0frontend" && npm run dev"
+)
 cd ..
 
-REM ── Done ─────────────────────────────────
+REM ── Apri browser ─────────────────────────
 echo.
-echo  Backend  → http://localhost:8000
-echo  API docs → http://localhost:8000/docs
-echo  Frontend → http://localhost:3000
+echo  Backend  ^-^> http://localhost:8000
+echo  API docs ^-^> http://localhost:8000/docs
+echo  Frontend ^-^> http://localhost:3000
 echo.
-timeout /t 3 >nul
+echo  Aspetto 5 secondi e apro il browser...
+timeout /t 5 >nul
 start http://localhost:3000
 
 echo Premi un tasto per chiudere questa finestra.
