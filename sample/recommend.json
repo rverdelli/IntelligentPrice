@@ -1,0 +1,7 @@
+{
+  "client_code": "C001",
+  "items": [
+    {"article_code": "A001", "qty": 10},
+    {"article_code": "A006", "qty": 5}
+  ]
+}
