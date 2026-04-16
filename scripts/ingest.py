@@ -77,6 +77,30 @@ def section(title: str) -> None:
     print(f"{'='*60}")
 
 
+def strip_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip leading/trailing whitespace from all column names.
+
+    Italian Excel exports often pad column headers with spaces.
+    """
+    df.columns = [c.strip() for c in df.columns]
+    return df
+
+
+def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Return the first column name from *candidates* that exists in *df*.
+
+    Comparison is done after stripping whitespace from both the DataFrame
+    column names and the candidate strings, so minor spacing differences
+    in the source CSV are tolerated.
+    """
+    stripped_map = {c.strip(): c for c in df.columns}
+    for candidate in candidates:
+        match = stripped_map.get(candidate.strip())
+        if match is not None:
+            return match
+    return None
+
+
 # ── Read CSVs ─────────────────────────────────────────────────────────────────
 section("Reading source CSVs")
 
@@ -97,17 +121,44 @@ for name, path in raw_files.items():
 
 # ── ANAG_CLIENTI → clients ────────────────────────────────────────────────────
 raw_clients = read_italian_csv(raw_files["ANAG_CLIENTI"])
-clients = raw_clients.rename(columns={
-    "Codcli":       "client_code",
-    "Descrtipcli":  "client_type",
-    "Descrfil":     "branch",
-    "Rag. Sociale": "client_name",
-    "Potenziale":   "potential",
-    "Numdip":       "num_employees",
-    "Città":        "city",
-    "Provincia":    "province",
-    "Descrage":     "agent",
-})
+strip_columns(raw_clients)
+print(f"  ANAG_CLIENTI columns found: {list(raw_clients.columns)}")
+
+# "Ragione Sociale" column name varies across Excel versions — try all known forms.
+rag_col = find_column(raw_clients, [
+    "Rag. Sociale", "Rag.Sociale", "Rag Sociale",
+    "Ragione Sociale", "RagSociale", "Ragione sociale",
+    "rag. sociale", "rag.sociale",
+])
+_client_rename: dict[str, str] = {
+    "Codcli":      "client_code",
+    "Descrtipcli": "client_type",
+    "Descrfil":    "branch",
+    "Potenziale":  "potential",
+    "Numdip":      "num_employees",
+    "Provincia":   "province",
+    "Descrage":    "agent",
+}
+# City column also uses accented character; strip_columns already stripped it.
+city_col = find_column(raw_clients, ["Città", "Citta", "City"])
+if city_col:
+    _client_rename[city_col] = "city"
+else:
+    warn("Column for 'Città' not found in ANAG_CLIENTI.")
+
+if rag_col:
+    _client_rename[rag_col] = "client_name"
+else:
+    warn(
+        f"Column for 'Rag. Sociale' not found in ANAG_CLIENTI. "
+        f"Available columns: {list(raw_clients.columns)}"
+    )
+
+clients = raw_clients.rename(columns=_client_rename)
+# Ensure client_name exists even when the source column was absent
+if "client_name" not in clients.columns:
+    clients["client_name"] = pd.NA
+
 clients["client_code"] = clients["client_code"].str.strip()
 # Replace empty strings with NaN for proper null handling
 clients.replace(r"^\s*$", pd.NA, regex=True, inplace=True)
@@ -115,6 +166,7 @@ clients["num_employees"] = pd.to_numeric(clients["num_employees"], errors="coerc
 
 # ── ANAG_ARTICOLI → articles ──────────────────────────────────────────────────
 raw_articles = read_italian_csv(raw_files["ANAG_ARTICOLI"])
+strip_columns(raw_articles)
 articles = raw_articles.rename(columns={
     "Codart":   "article_code",
     "Codsco":   "sco_code",
@@ -126,6 +178,7 @@ articles.replace(r"^\s*$", pd.NA, regex=True, inplace=True)
 
 # ── OFFERTE_2025 → offers ─────────────────────────────────────────────────────
 raw_offers = read_italian_csv(raw_files["OFFERTE_2025"])
+strip_columns(raw_offers)
 offers = raw_offers.rename(columns={
     "Numoff":          "offer_num",
     "Rigoff":          "offer_row",
@@ -158,6 +211,7 @@ offers.loc[offers["net_price"] == 0, "margin_pct"] = pd.NA
 
 # ── ODV_2025_v2 → orders ──────────────────────────────────────────────────────
 raw_orders = read_italian_csv(raw_files["ODV_2025_v2"])
+strip_columns(raw_orders)
 orders = raw_orders.rename(columns={
     "Numord":       "order_num",
     "Rigord":       "order_row",
@@ -173,6 +227,7 @@ orders["qty"]          = to_float(orders["qty"])
 
 # ── CARTELLINI ────────────────────────────────────────────────────────────────
 raw_cartellini = read_italian_csv(raw_files["CARTELLINI"])
+strip_columns(raw_cartellini)
 cartellini = raw_cartellini.rename(columns={
     "Codcli":    "client_code",
     "Codsco":    "sco_code",
@@ -184,6 +239,7 @@ cartellini["contract_discount_pct"] = to_float(cartellini["contract_discount_pct
 
 # ── PROMOZIONI-ARTICOLI → promo_articles ─────────────────────────────────────
 raw_promo_art = read_italian_csv(raw_files["PROMOZIONI_ARTICOLI"])
+strip_columns(raw_promo_art)
 promo_articles = raw_promo_art.rename(columns={
     "N*promo":       "promo_id",
     "Tipo promo":    "promo_type",
@@ -200,6 +256,7 @@ promo_articles["multiplier"]    = to_float(promo_articles["multiplier"])
 
 # ── PROMOZIONI-CLIENTI → promo_clients ───────────────────────────────────────
 raw_promo_cli = read_italian_csv(raw_files["PROMOZIONI_CLIENTI"])
+strip_columns(raw_promo_cli)
 promo_clients = raw_promo_cli.rename(columns={
     "n° promo": "promo_id",
     "Cliente":  "client_code",

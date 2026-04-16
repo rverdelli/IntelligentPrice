@@ -87,16 +87,19 @@ def client_context(
         for r in offer_rows
     ]
 
+    # Convert Row to dict for safe .get() access (client_name may be absent
+    # in databases ingested with an older version of ingest.py).
+    client_dict = dict(client_row)
     return ClientContext(
-        client_code=client_row["client_code"],
-        client_name=client_row["client_name"] or None,
-        client_type=client_row["client_type"] or None,
-        branch=client_row["branch"] or None,
-        city=client_row["city"] or None,
-        province=client_row["province"] or None,
-        agent=client_row["agent"] or None,
-        potential=client_row["potential"] or None,
-        num_employees=client_row["num_employees"],
+        client_code=client_dict["client_code"],
+        client_name=client_dict.get("client_name") or None,
+        client_type=client_dict.get("client_type") or None,
+        branch=client_dict.get("branch") or None,
+        city=client_dict.get("city") or None,
+        province=client_dict.get("province") or None,
+        agent=client_dict.get("agent") or None,
+        potential=client_dict.get("potential") or None,
+        num_employees=client_dict.get("num_employees"),
         cartellini=cartellini,
         recent_offers=recent_offers,
     )

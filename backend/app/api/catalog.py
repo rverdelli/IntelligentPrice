@@ -16,6 +16,16 @@ from app.schemas import ArticleBrief, ClientBrief
 router = APIRouter(prefix="/catalog", tags=["Catalogo"])
 
 
+def _client_name_expr(db: sqlite3.Connection) -> str:
+    """Return the SQL expression to use for the client name column.
+
+    If the ``client_name`` column is absent (database ingested with an older
+    version of ingest.py), fall back to ``client_code`` so queries don't crash.
+    """
+    cols = {r[1] for r in db.execute("PRAGMA table_info(clients)").fetchall()}
+    return "client_name" if "client_name" in cols else "client_code"
+
+
 @router.get("/clients", response_model=list[ClientBrief])
 def list_clients(
     search: Optional[str] = Query(default=None, description="Cerca per codice, nome, città o provincia"),
@@ -23,25 +33,28 @@ def list_clients(
     db: sqlite3.Connection = Depends(get_db),
 ) -> list[ClientBrief]:
     """Ricerca clienti — restituisce codice, nome, tipo, provincia."""
+    name_col = _client_name_expr(db)
+
     if search:
         like = f"%{search.strip()}%"
+        name_filter = f"OR   {name_col} LIKE ?" if name_col != "client_code" else ""
         rows = db.execute(
-            """
-            SELECT client_code, client_name, client_type, branch, city, province
+            f"""
+            SELECT client_code, {name_col} AS client_name, client_type, branch, city, province
             FROM   clients
             WHERE  client_code LIKE ?
-              OR   client_name LIKE ?
+              {name_filter}
               OR   city        LIKE ?
               OR   province    LIKE ?
             ORDER BY client_code
             LIMIT ?
             """,
-            (like, like, like, like, limit),
+            (like, like, like, like, limit) if name_col != "client_code" else (like, like, like, limit),
         ).fetchall()
     else:
         rows = db.execute(
-            """
-            SELECT client_code, client_name, client_type, branch, city, province
+            f"""
+            SELECT client_code, {name_col} AS client_name, client_type, branch, city, province
             FROM   clients
             ORDER BY client_code
             LIMIT ?
