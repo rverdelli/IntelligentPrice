@@ -167,12 +167,41 @@ clients["num_employees"] = pd.to_numeric(clients["num_employees"], errors="coerc
 # ── ANAG_ARTICOLI → articles ──────────────────────────────────────────────────
 raw_articles = read_italian_csv(raw_files["ANAG_ARTICOLI"])
 strip_columns(raw_articles)
-articles = raw_articles.rename(columns={
-    "Codart":   "article_code",
-    "Codsco":   "sco_code",
-    "Descrsco": "sco_desc",
-    "Descart":  "article_desc",
-})
+print(f"  ANAG_ARTICOLI columns found: {list(raw_articles.columns)}")
+
+art_desc_col = find_column(raw_articles, [
+    "Descart", "Descr.art.", "Descr. art.", "Descrizione articolo",
+    "Descr art", "Descrizione Art", "desc art",
+])
+sco_desc_col = find_column(raw_articles, [
+    "Descrsco", "Descr.sco", "Descr. sco", "Descrizione SCO",
+    "Descr SCO", "Descrizione Sco", "desc sco",
+])
+_art_rename: dict[str, str] = {
+    "Codart": "article_code",
+    "Codsco": "sco_code",
+}
+if art_desc_col:
+    _art_rename[art_desc_col] = "article_desc"
+else:
+    warn(
+        f"Column for 'Descart' (article_desc) not found in ANAG_ARTICOLI. "
+        f"Available columns: {list(raw_articles.columns)}"
+    )
+if sco_desc_col:
+    _art_rename[sco_desc_col] = "sco_desc"
+else:
+    warn(
+        f"Column for 'Descrsco' (sco_desc) not found in ANAG_ARTICOLI. "
+        f"Available columns: {list(raw_articles.columns)}"
+    )
+
+articles = raw_articles.rename(columns=_art_rename)
+if "article_desc" not in articles.columns:
+    articles["article_desc"] = pd.NA
+if "sco_desc" not in articles.columns:
+    articles["sco_desc"] = pd.NA
+
 articles["article_code"] = articles["article_code"].str.strip()
 articles.replace(r"^\s*$", pd.NA, regex=True, inplace=True)
 

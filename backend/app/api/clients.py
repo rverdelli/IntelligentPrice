@@ -30,13 +30,18 @@ def client_context(
     if client_row is None:
         raise HTTPException(status_code=404, detail=f"Cliente non trovato: {client_code}")
 
+    # Detect optional article columns once (may be absent on old ingest)
+    _art_cols = {r[1] for r in db.execute("PRAGMA table_info(articles)").fetchall()}
+    _sco_desc_inner = "sco_desc"    if "sco_desc"    in _art_cols else "NULL"
+    _art_desc       = "a.article_desc" if "article_desc" in _art_cols else "NULL"
+
     # ── Cartellini ──────────────────────────────────────────────────────────
     cart_rows = db.execute(
-        """
+        f"""
         SELECT c.client_code, c.sco_code, c.contract_discount_pct, a.sco_desc
         FROM   cartellini c
         LEFT JOIN (
-            SELECT DISTINCT sco_code, sco_desc FROM articles
+            SELECT DISTINCT sco_code, {_sco_desc_inner} AS sco_desc FROM articles
         ) a ON c.sco_code = a.sco_code
         WHERE  c.client_code = ?
         ORDER BY c.sco_code
@@ -54,11 +59,12 @@ def client_context(
     ]
 
     # ── Last 10 offers ──────────────────────────────────────────────────────
+
     offer_rows = db.execute(
-        """
+        f"""
         SELECT
             o.offer_num, o.offer_row, o.article_code,
-            a.article_desc,
+            {_art_desc} AS article_desc,
             o.offer_date, o.qty,
             o.list_price, o.net_price,
             o.discount_pct, o.row_status

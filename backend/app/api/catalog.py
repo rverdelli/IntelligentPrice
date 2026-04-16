@@ -75,6 +75,18 @@ def list_clients(
     ]
 
 
+def _article_col_exprs(db: sqlite3.Connection) -> tuple[str, str]:
+    """Return (article_desc_expr, sco_desc_expr) for the articles table.
+
+    Falls back to NULL when a description column is absent so queries don't
+    crash on databases ingested with older versions of ingest.py.
+    """
+    cols = {r[1] for r in db.execute("PRAGMA table_info(articles)").fetchall()}
+    art_desc = "article_desc" if "article_desc" in cols else "NULL"
+    sco_desc = "sco_desc"     if "sco_desc"     in cols else "NULL"
+    return art_desc, sco_desc
+
+
 @router.get("/articles", response_model=list[ArticleBrief])
 def list_articles(
     search: Optional[str] = Query(default=None, description="Cerca per codice, descrizione o SCO"),
@@ -82,25 +94,36 @@ def list_articles(
     db: sqlite3.Connection = Depends(get_db),
 ) -> list[ArticleBrief]:
     """Ricerca articoli — restituisce codice, descrizione, SCO."""
+    art_desc, sco_desc = _article_col_exprs(db)
+
     if search:
         like = f"%{search.strip()}%"
+        # Build WHERE filters only for columns that actually exist
+        extra_filters = ""
+        params: list = [like]
+        if art_desc != "NULL":
+            extra_filters += "  OR   article_desc  LIKE ?\n"
+            params.append(like)
+        if sco_desc != "NULL":
+            extra_filters += "  OR   sco_desc      LIKE ?\n"
+            params.append(like)
+        params += [like, limit]
         rows = db.execute(
-            """
-            SELECT article_code, article_desc, sco_code, sco_desc
+            f"""
+            SELECT article_code, {art_desc} AS article_desc, sco_code, {sco_desc} AS sco_desc
             FROM   articles
             WHERE  article_code  LIKE ?
-              OR   article_desc  LIKE ?
+              {extra_filters}
               OR   sco_code      LIKE ?
-              OR   sco_desc      LIKE ?
             ORDER BY article_code
             LIMIT ?
             """,
-            (like, like, like, like, limit),
+            params,
         ).fetchall()
     else:
         rows = db.execute(
-            """
-            SELECT article_code, article_desc, sco_code, sco_desc
+            f"""
+            SELECT article_code, {art_desc} AS article_desc, sco_code, {sco_desc} AS sco_desc
             FROM   articles
             ORDER BY article_code
             LIMIT ?
