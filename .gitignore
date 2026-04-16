@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+.pnpm-store/
+
+# Data — keep raw CSVs, ignore generated DB
+data/marchiol.db
+
+# Editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

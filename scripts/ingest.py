@@ -1,0 +1,304 @@
+"""
+M0: CSV → SQLite ingestion pipeline for Marchiol pricing data.
+
+Usage:
+    python scripts/ingest.py [--db data/marchiol.db] [--raw data/raw]
+
+Reads 7 CSVs in Italian format (semicolon delimiter, comma decimal separator,
+UTF-8 BOM), normalises column names, derives discount_pct and margin_pct,
+creates indexes, and prints a data-quality report.
+
+Idempotent: drops and recreates all tables on each run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sqlite3
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+parser = argparse.ArgumentParser()
+parser.add_argument("--db", default="data/marchiol.db")
+parser.add_argument("--raw", default="data/raw")
+args = parser.parse_args()
+
+DB_PATH = Path(args.db)
+RAW_DIR = Path(args.raw)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def read_italian_csv(path: Path, **kwargs) -> pd.DataFrame:
+    """Read a semicolon-delimited Italian CSV (comma decimals, UTF-8 BOM)."""
+    return pd.read_csv(
+        path,
+        sep=";",
+        decimal=",",
+        encoding="utf-8-sig",
+        dtype=str,          # read everything as str first — we cast below
+        **kwargs,
+    )
+
+
+def to_float(series: pd.Series) -> pd.Series:
+    """Convert a string series with optional comma decimals to float."""
+    return pd.to_numeric(
+        series.str.replace(",", ".", regex=False).str.strip(),
+        errors="coerce",
+    )
+
+
+def parse_italian_date(series: pd.Series) -> pd.Series:
+    """Parse DD/MM/YYYY date strings."""
+    return pd.to_datetime(series, format="%d/%m/%Y", errors="coerce").dt.date.astype(str)
+
+
+def warn(msg: str) -> None:
+    print(f"[WARN]  {msg}", file=sys.stderr)
+
+
+def section(title: str) -> None:
+    print(f"\n{'='*60}")
+    print(f"  {title}")
+    print(f"{'='*60}")
+
+
+# ── Read CSVs ─────────────────────────────────────────────────────────────────
+section("Reading source CSVs")
+
+raw_files = {
+    "OFFERTE_2025":        RAW_DIR / "OFFERTE_2025.csv",
+    "ODV_2025_v2":         RAW_DIR / "ODV_2025_v2.csv",
+    "ANAG_CLIENTI":        RAW_DIR / "ANAG_CLIENTI.csv",
+    "ANAG_ARTICOLI":       RAW_DIR / "ANAG_ARTICOLI.csv",
+    "CARTELLINI":          RAW_DIR / "CARTELLINI.csv",
+    "PROMOZIONI_ARTICOLI": RAW_DIR / "PROMOZIONI-ARTICOLI.csv",
+    "PROMOZIONI_CLIENTI":  RAW_DIR / "PROMOZIONI-CLIENTI.csv",
+}
+
+for name, path in raw_files.items():
+    if not path.exists():
+        sys.exit(f"[ERROR] Required CSV not found: {path}")
+    print(f"  {name}: {path}")
+
+# ── ANAG_CLIENTI → clients ────────────────────────────────────────────────────
+raw_clients = read_italian_csv(raw_files["ANAG_CLIENTI"])
+clients = raw_clients.rename(columns={
+    "Codcli":       "client_code",
+    "Descrtipcli":  "client_type",
+    "Descrfil":     "branch",
+    "Rag. Sociale": "client_name",
+    "Potenziale":   "potential",
+    "Numdip":       "num_employees",
+    "Città":        "city",
+    "Provincia":    "province",
+    "Descrage":     "agent",
+})
+clients["client_code"] = clients["client_code"].str.strip()
+# Replace empty strings with NaN for proper null handling
+clients.replace(r"^\s*$", pd.NA, regex=True, inplace=True)
+clients["num_employees"] = pd.to_numeric(clients["num_employees"], errors="coerce")
+
+# ── ANAG_ARTICOLI → articles ──────────────────────────────────────────────────
+raw_articles = read_italian_csv(raw_files["ANAG_ARTICOLI"])
+articles = raw_articles.rename(columns={
+    "Codart":   "article_code",
+    "Codsco":   "sco_code",
+    "Descrsco": "sco_desc",
+    "Descart":  "article_desc",
+})
+articles["article_code"] = articles["article_code"].str.strip()
+articles.replace(r"^\s*$", pd.NA, regex=True, inplace=True)
+
+# ── OFFERTE_2025 → offers ─────────────────────────────────────────────────────
+raw_offers = read_italian_csv(raw_files["OFFERTE_2025"])
+offers = raw_offers.rename(columns={
+    "Numoff":          "offer_num",
+    "Rigoff":          "offer_row",
+    "Codcli":          "client_code",
+    "Codart":          "article_code",
+    "Data_Offerta":    "offer_date",
+    "Qtaoff":          "qty",
+    "List_Appl_Unit":  "list_price",
+    "Prz_Netto_Unit":  "net_price",
+    "Cdv_Unit":        "unit_cost",
+    "Stato_Riga_Off":  "row_status",
+})
+offers["client_code"]  = offers["client_code"].str.strip()
+offers["article_code"] = offers["article_code"].str.strip()
+offers["row_status"]   = offers["row_status"].str.strip()
+offers["offer_date"]   = parse_italian_date(offers["offer_date"])
+for col in ("qty", "list_price", "net_price", "unit_cost"):
+    offers[col] = to_float(offers[col])
+
+# Derived columns
+offers["discount_pct"] = (
+    (offers["list_price"] - offers["net_price"]) / offers["list_price"]
+).round(4)
+offers["margin_pct"] = (
+    (offers["net_price"] - offers["unit_cost"]) / offers["net_price"]
+).round(4)
+# Guard against division by zero / invalid prices
+offers.loc[offers["list_price"] == 0, "discount_pct"] = pd.NA
+offers.loc[offers["net_price"] == 0, "margin_pct"] = pd.NA
+
+# ── ODV_2025_v2 → orders ──────────────────────────────────────────────────────
+raw_orders = read_italian_csv(raw_files["ODV_2025_v2"])
+orders = raw_orders.rename(columns={
+    "Numord":       "order_num",
+    "Rigord":       "order_row",
+    "Codcli":       "client_code",
+    "Codart":       "article_code",
+    "Data_ordine":  "order_date",
+    "Qtaord":       "qty",
+})
+orders["client_code"]  = orders["client_code"].str.strip()
+orders["article_code"] = orders["article_code"].str.strip()
+orders["order_date"]   = parse_italian_date(orders["order_date"])
+orders["qty"]          = to_float(orders["qty"])
+
+# ── CARTELLINI ────────────────────────────────────────────────────────────────
+raw_cartellini = read_italian_csv(raw_files["CARTELLINI"])
+cartellini = raw_cartellini.rename(columns={
+    "Codcli":    "client_code",
+    "Codsco":    "sco_code",
+    "PercSco":   "contract_discount_pct",
+})
+cartellini["client_code"]          = cartellini["client_code"].str.strip()
+cartellini["sco_code"]             = cartellini["sco_code"].str.strip()
+cartellini["contract_discount_pct"] = to_float(cartellini["contract_discount_pct"])
+
+# ── PROMOZIONI-ARTICOLI → promo_articles ─────────────────────────────────────
+raw_promo_art = read_italian_csv(raw_files["PROMOZIONI_ARTICOLI"])
+promo_articles = raw_promo_art.rename(columns={
+    "N*promo":       "promo_id",
+    "Tipo promo":    "promo_type",
+    "Articolo":      "article_code",
+    "Importo":       "amount",
+    "Divisa":        "currency",
+    "Moltiplicatore":"multiplier",
+    "UM":            "unit",
+})
+promo_articles["promo_id"]      = promo_articles["promo_id"].str.strip()
+promo_articles["article_code"]  = promo_articles["article_code"].str.strip()
+promo_articles["amount"]        = to_float(promo_articles["amount"])
+promo_articles["multiplier"]    = to_float(promo_articles["multiplier"])
+
+# ── PROMOZIONI-CLIENTI → promo_clients ───────────────────────────────────────
+raw_promo_cli = read_italian_csv(raw_files["PROMOZIONI_CLIENTI"])
+promo_clients = raw_promo_cli.rename(columns={
+    "n° promo": "promo_id",
+    "Cliente":  "client_code",
+})
+promo_clients["promo_id"]     = promo_clients["promo_id"].str.strip()
+promo_clients["client_code"]  = promo_clients["client_code"].str.strip()
+
+# ── Write SQLite ──────────────────────────────────────────────────────────────
+section("Writing SQLite database")
+print(f"  Target: {DB_PATH}")
+
+con = sqlite3.connect(DB_PATH)
+cur = con.cursor()
+
+# Drop all tables for idempotency
+for tbl in (
+    "offers", "orders", "clients", "articles",
+    "cartellini", "promo_articles", "promo_clients",
+):
+    cur.execute(f"DROP TABLE IF EXISTS {tbl}")
+
+# Write tables
+offers.to_sql("offers",         con, index=False, if_exists="replace")
+orders.to_sql("orders",         con, index=False, if_exists="replace")
+clients.to_sql("clients",       con, index=False, if_exists="replace")
+articles.to_sql("articles",     con, index=False, if_exists="replace")
+cartellini.to_sql("cartellini", con, index=False, if_exists="replace")
+promo_articles.to_sql("promo_articles", con, index=False, if_exists="replace")
+promo_clients.to_sql("promo_clients",   con, index=False, if_exists="replace")
+
+# ── Indexes ───────────────────────────────────────────────────────────────────
+cur.executescript("""
+    CREATE INDEX IF NOT EXISTS idx_offers_client_article ON offers(client_code, article_code);
+    CREATE INDEX IF NOT EXISTS idx_offers_sco ON offers(article_code);
+    CREATE INDEX IF NOT EXISTS idx_offers_date ON offers(offer_date);
+    CREATE INDEX IF NOT EXISTS idx_orders_client_article ON orders(client_code, article_code);
+    CREATE INDEX IF NOT EXISTS idx_articles_sco ON articles(sco_code);
+    CREATE INDEX IF NOT EXISTS idx_cartellini_client_sco ON cartellini(client_code, sco_code);
+    CREATE INDEX IF NOT EXISTS idx_promo_articles_article ON promo_articles(article_code);
+    CREATE INDEX IF NOT EXISTS idx_promo_clients_client ON promo_clients(client_code);
+""")
+con.commit()
+con.close()
+print("  Done.")
+
+# ── Data Quality Report ───────────────────────────────────────────────────────
+section("Data Quality Report")
+
+print("\n── Row counts ──────────────────────────────────────────────")
+table_counts = {
+    "offers":         len(offers),
+    "orders":         len(orders),
+    "clients":        len(clients),
+    "articles":       len(articles),
+    "cartellini":     len(cartellini),
+    "promo_articles": len(promo_articles),
+    "promo_clients":  len(promo_clients),
+}
+for tbl, cnt in table_counts.items():
+    print(f"  {tbl:<20} {cnt:>6} rows")
+
+print("\n── Offer row_status distribution ───────────────────────────")
+for status, cnt in offers["row_status"].value_counts().items():
+    pct = 100 * cnt / len(offers)
+    print(f"  {status:<10} {cnt:>5} ({pct:.1f}%)")
+
+print("\n── Client type distribution ────────────────────────────────")
+for ctype, cnt in clients["client_type"].value_counts().items():
+    print(f"  {str(ctype):<20} {cnt:>4}")
+
+print("\n── Null rates for optional client fields ───────────────────")
+optional_fields = ["province", "agent", "potential", "num_employees"]
+for fld in optional_fields:
+    n_null = clients[fld].isna().sum()
+    pct = 100 * n_null / len(clients) if len(clients) > 0 else 0
+    print(f"  {fld:<20} {n_null:>3} / {len(clients)} null  ({pct:.1f}%)")
+
+print("\n── Article coverage ────────────────────────────────────────")
+arts_in_offers   = set(offers["article_code"].dropna())
+arts_in_anagrafica = set(articles["article_code"].dropna())
+print(f"  Articles in offers:       {len(arts_in_offers)}")
+print(f"  Articles in anagrafica:   {len(arts_in_anagrafica)}")
+arts_only_offers = arts_in_offers - arts_in_anagrafica
+if arts_only_offers:
+    warn(f"Articles in offers not in anagrafica: {sorted(arts_only_offers)}")
+else:
+    print("  All offer articles found in anagrafica: OK")
+
+print("\n── Client coverage ─────────────────────────────────────────")
+clients_in_offers = set(offers["client_code"].dropna())
+clients_in_anagrafica = set(clients["client_code"].dropna())
+orphan_clients = clients_in_offers - clients_in_anagrafica
+if orphan_clients:
+    warn(f"Clients in offers not found in anagrafica: {sorted(orphan_clients)}")
+else:
+    print("  All offer clients found in anagrafica: OK")
+
+print("\n── Promo warnings ──────────────────────────────────────────")
+if "offer_date" not in raw_promo_art.columns and "data_inizio" not in raw_promo_art.columns:
+    warn("PROMOZIONI-ARTICOLI has no date/period column — all promos treated as currently active.")
+if "offer_date" not in raw_promo_cli.columns:
+    warn("PROMOZIONI-CLIENTI has no date/period column — all promos treated as currently active.")
+
+print("\n── Derived columns sample (offers) ─────────────────────────")
+sample = offers[["offer_num", "client_code", "article_code",
+                  "list_price", "net_price", "unit_cost",
+                  "discount_pct", "margin_pct"]].head(5)
+print(sample.to_string(index=False))
+
+print(f"\n{'='*60}")
+print(f"  Ingestion complete → {DB_PATH}")
+print(f"{'='*60}\n")

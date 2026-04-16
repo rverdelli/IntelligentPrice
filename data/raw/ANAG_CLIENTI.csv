@@ -1,0 +1,11 @@
+﻿Codcli;Descrtipcli;Descrfil;Rag. Sociale;Potenziale;Numdip;Città;Provincia;Descrage
+C001;Installatore;Filiale Nord;Mario Rossi Impianti;Alto;15;Milano;MI;Rossi
+C002;Impresa;Filiale Centro;Costruzioni Bianchi Srl;Medio;45;Roma;RM;Bianchi
+C003;Rivenditore;Filiale Nord;Elettrostore Torino;Alto;8;Torino;TO;Rossi
+C004;OEM;Filiale Nord;AutoElettro OEM Srl;Alto;120;Milano;MI;Bianchi
+C005;Quadrista;Filiale Sud;Quadri Napoli Srl;Basso;5;Napoli;NA;Verdi
+C006;Installatore;Filiale Nord;Bergamo Impianti;;10;Bergamo;BG;Rossi
+C007;Impresa;Filiale Centro;Costruzioni Verde Srl;Medio;30;Firenze;FI;Bianchi
+C008;Rivenditore;Filiale Sud;;Basso;;Palermo;PA;Verdi
+C009;Installatore;Filiale Nord;Varese Elettrica;;7;Varese;VA;Rossi
+C010;OEM;Filiale Centro;Roma OEM Srl;Medio;55;Roma;RM;Bianchi

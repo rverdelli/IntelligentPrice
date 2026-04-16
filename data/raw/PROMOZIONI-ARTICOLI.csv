@@ -1,0 +1,5 @@
+﻿N*promo;Tipo promo;Articolo;Importo;Divisa;Moltiplicatore;UM
+P001;Sconto Speciale;A010;10,00;EUR;1,00;PZ
+P001;Sconto Speciale;A005;8,00;EUR;1,00;PZ
+P002;Promo Volume;A001;5,00;EUR;10,00;PZ
+P002;Promo Volume;A002;6,00;EUR;10,00;PZ
