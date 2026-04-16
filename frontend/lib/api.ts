@@ -96,9 +96,11 @@ export function searchClients(search?: string): Promise<ClientBrief[]> {
   return apiFetch(`/catalog/clients?limit=30${q}`)
 }
 
-export function searchArticles(search?: string): Promise<ArticleBrief[]> {
-  const q = search ? `&search=${encodeURIComponent(search)}` : ''
-  return apiFetch(`/catalog/articles?limit=30${q}`)
+export function searchArticles(search?: string, withHistory = false): Promise<ArticleBrief[]> {
+  const params = new URLSearchParams({ limit: '30' })
+  if (search) params.set('search', search)
+  if (withHistory) params.set('with_history', 'true')
+  return apiFetch(`/catalog/articles?${params}`)
 }
 
 export function getClientContext(code: string): Promise<ClientContext> {

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { searchClients, type ClientBrief } from '@/lib/api'
-import { Search, Building2, ChevronRight, Loader2 } from 'lucide-react'
+import { Search, Building2, ChevronRight, Loader2, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const TYPE_COLORS: Record<string, string> = {
@@ -43,13 +43,26 @@ export default function HomePage() {
   return (
     <div className="max-w-xl mx-auto pt-14 px-4 pb-16">
       {/* Hero */}
-      <div className="text-center mb-8">
+      <div className="text-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-1">
           Seleziona un cliente
         </h1>
         <p className="text-gray-500 text-sm">
           Cerca per nome, codice, città o provincia
         </p>
+      </div>
+
+      {/* Help panel */}
+      <div className="mb-5 flex gap-3 items-start bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+        <Info className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" />
+        <div>
+          <p className="font-semibold mb-0.5">Come si usa</p>
+          <p className="text-blue-700 text-xs leading-relaxed">
+            Trova il cliente a cui stai preparando un&apos;offerta e fai clic sulla riga.
+            Si aprirà il <strong>Cockpit prezzi</strong> dove potrai scegliere gli articoli
+            e ottenere lo sconto consigliato basato sullo storico ordini.
+          </p>
+        </div>
       </div>
 
       {/* Search input */}

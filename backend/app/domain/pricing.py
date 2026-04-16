@@ -16,7 +16,7 @@ import pandas as pd
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 MIN_POOL = 5
-LOOKBACK_DAYS = 365  # 12-month window for unit_cost / list_price medians
+LOOKBACK_DAYS = 1095  # 3-year window for unit_cost / list_price medians
 
 # Cascade step names → data sufficiency levels
 _STEP_SUFFICIENCY: dict[str, str] = {

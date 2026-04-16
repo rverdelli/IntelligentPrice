@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   getClientContext, searchArticles, getRecommendations,
@@ -10,7 +10,7 @@ import { RecommendationCard } from '@/components/cockpit/recommendation-card'
 import { pct, cn } from '@/lib/utils'
 import {
   ArrowLeft, Search, Plus, Loader2, User, MapPin,
-  Briefcase, ShieldCheck, ReceiptText,
+  Briefcase, ShieldCheck, ReceiptText, Info, Clock,
 } from 'lucide-react'
 
 interface BasketItem {
@@ -39,6 +39,7 @@ export default function CockpitPage() {
   const [artResults, setArtResults] = useState<ArticleBrief[]>([])
   const [artLoading, setArtLoading] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
+  const [inputFocused, setInputFocused] = useState(false)
   const [qty, setQty] = useState(1)
   const searchRef = useRef<HTMLDivElement>(null)
 
@@ -48,6 +49,25 @@ export default function CockpitPage() {
   const [recLoading, setRecLoading] = useState(false)
   const [recError, setRecError] = useState<string | null>(null)
 
+  // Unique articles from this client's recent offers → always have history
+  const suggestedArticles = useMemo<ArticleBrief[]>(() => {
+    if (!ctx?.recent_offers.length) return []
+    const seen = new Set<string>()
+    return ctx.recent_offers
+      .filter(o => {
+        if (seen.has(o.article_code)) return false
+        seen.add(o.article_code)
+        return true
+      })
+      .filter(o => !basket.some(b => b.article.article_code === o.article_code))
+      .map(o => ({
+        article_code: o.article_code,
+        article_desc: o.article_desc,
+        sco_code: '',
+        sco_desc: null,
+      }))
+  }, [ctx, basket])
+
   // Load client context
   useEffect(() => {
     getClientContext(client_code)
@@ -55,13 +75,13 @@ export default function CockpitPage() {
       .catch(e => setCtxError(e.message))
   }, [client_code])
 
-  // Debounced article search
+  // Debounced article search — only articles with offer history (with_history=true)
   useEffect(() => {
-    if (!artQuery.trim()) { setArtResults([]); setShowDropdown(false); return }
+    if (!artQuery.trim()) { setArtResults([]); return }
     setArtLoading(true)
     const t = setTimeout(async () => {
       try {
-        const res = await searchArticles(artQuery)
+        const res = await searchArticles(artQuery, true)
         setArtResults(res)
         setShowDropdown(true)
       } finally {
@@ -242,6 +262,20 @@ export default function CockpitPage() {
       {/* ── MAIN AREA ─────────────────────────────────────────────────── */}
       <div className="flex-1 p-5 lg:p-6 space-y-5 max-w-3xl">
 
+        {/* Help panel */}
+        <div className="flex gap-3 items-start bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+          <Info className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" />
+          <div>
+            <p className="font-semibold mb-1">Come usare il Cockpit prezzi</p>
+            <ol className="list-decimal list-inside space-y-0.5 text-blue-700 text-xs leading-relaxed">
+              <li>Clicca nel campo <strong>Aggiungi articolo</strong> — appaiono i prodotti già offerti a questo cliente oppure cerca per codice/descrizione.</li>
+              <li>Imposta la <strong>quantità</strong> e aggiungi tutti gli articoli dell&apos;offerta.</li>
+              <li>Premi <strong>Calcola sconto</strong> per ottenere la raccomandazione basata sullo storico.</li>
+              <li>Ogni scheda mostra lo sconto suggerito, il range IQ 25-75 %, il floor contrattuale (cartellino) e il margine atteso.</li>
+            </ol>
+          </div>
+        </div>
+
         {/* Article search bar */}
         <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
           <p className="text-sm font-medium text-gray-700 mb-3">Aggiungi articolo</p>
@@ -257,28 +291,43 @@ export default function CockpitPage() {
                 placeholder="Cerca articolo per codice o descrizione..."
                 value={artQuery}
                 onChange={e => setArtQuery(e.target.value)}
-                onFocus={() => artResults.length > 0 && setShowDropdown(true)}
+                onFocus={() => { setInputFocused(true); setShowDropdown(true) }}
+                onBlur={() => setTimeout(() => setInputFocused(false), 150)}
                 className="w-full pl-9 pr-9 py-2 border border-gray-300 rounded-lg text-sm
                            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
-              {/* Dropdown */}
-              {showDropdown && artResults.length > 0 && (
-                <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-                  {artResults.map(a => (
-                    <button
-                      key={a.article_code}
-                      onMouseDown={() => addArticle(a)}
-                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-blue-50 text-left text-sm transition-colors"
-                    >
-                      <div>
-                        <p className="font-medium text-gray-900">{a.article_desc ?? a.article_code}</p>
-                        <p className="text-xs text-gray-400">{a.article_code} · {a.sco_desc ?? a.sco_code}</p>
+              {/* Dropdown — search results or client's recent articles */}
+              {(() => {
+                const items = artQuery.trim() ? artResults : (inputFocused ? suggestedArticles : [])
+                const label = artQuery.trim() ? null : 'Articoli recenti del cliente'
+                if (!items.length) return null
+                return (
+                  <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                    {label && (
+                      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-100 bg-gray-50">
+                        <Clock className="w-3 h-3 text-gray-400" />
+                        <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</span>
                       </div>
-                      <Plus className="w-4 h-4 text-blue-400 shrink-0 ml-2" />
-                    </button>
-                  ))}
-                </div>
-              )}
+                    )}
+                    {items.map(a => (
+                      <button
+                        key={a.article_code}
+                        onMouseDown={() => addArticle(a)}
+                        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-blue-50 text-left text-sm transition-colors"
+                      >
+                        <div>
+                          <p className="font-medium text-gray-900">{a.article_desc ?? a.article_code}</p>
+                          <p className="text-xs text-gray-400">
+                            {a.article_code}
+                            {(a.sco_desc ?? a.sco_code) ? ` · ${a.sco_desc ?? a.sco_code}` : ''}
+                          </p>
+                        </div>
+                        <Plus className="w-4 h-4 text-blue-400 shrink-0 ml-2" />
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Qty */}
@@ -350,10 +399,13 @@ export default function CockpitPage() {
 
         {/* Empty state */}
         {basket.length === 0 && (
-          <div className="text-center pt-16 text-gray-400">
+          <div className="text-center pt-12 text-gray-400">
             <Search className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">Nessun articolo selezionato</p>
-            <p className="text-sm mt-1">Cerca un articolo e aggiungi la quantità per calcolare lo sconto</p>
+            <p className="font-medium text-gray-500">Nessun articolo selezionato</p>
+            <p className="text-sm mt-1">
+              Clicca nel campo qui sopra per vedere i prodotti già offerti a questo cliente,
+              oppure cerca per codice o descrizione.
+            </p>
           </div>
         )}
       </div>

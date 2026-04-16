@@ -90,31 +90,39 @@ def _article_col_exprs(db: sqlite3.Connection) -> tuple[str, str]:
 @router.get("/articles", response_model=list[ArticleBrief])
 def list_articles(
     search: Optional[str] = Query(default=None, description="Cerca per codice, descrizione o SCO"),
+    with_history: bool = Query(default=False, description="Solo articoli con almeno un'offerta in archivio"),
     limit: int = Query(default=20, ge=1, le=200),
     db: sqlite3.Connection = Depends(get_db),
 ) -> list[ArticleBrief]:
     """Ricerca articoli — restituisce codice, descrizione, SCO."""
     art_desc, sco_desc = _article_col_exprs(db)
 
+    # When with_history=True only return articles that appear in the offers table.
+    # No date filter here — the pricing engine applies its own lookback window.
+    history_clause = (
+        "AND EXISTS (SELECT 1 FROM offers o WHERE o.article_code = articles.article_code)"
+        if with_history else ""
+    )
+
     if search:
         like = f"%{search.strip()}%"
-        # Build WHERE filters only for columns that actually exist
-        extra_filters = ""
+        desc_filter = "OR   article_desc  LIKE ?" if art_desc != "NULL" else ""
+        sco_filter  = "OR   sco_desc      LIKE ?" if sco_desc != "NULL" else ""
         params: list = [like]
         if art_desc != "NULL":
-            extra_filters += "  OR   article_desc  LIKE ?\n"
             params.append(like)
         if sco_desc != "NULL":
-            extra_filters += "  OR   sco_desc      LIKE ?\n"
             params.append(like)
         params += [like, limit]
         rows = db.execute(
             f"""
             SELECT article_code, {art_desc} AS article_desc, sco_code, {sco_desc} AS sco_desc
             FROM   articles
-            WHERE  article_code  LIKE ?
-              {extra_filters}
-              OR   sco_code      LIKE ?
+            WHERE  (article_code LIKE ?
+              {desc_filter}
+              {sco_filter}
+              OR   sco_code      LIKE ?)
+            {history_clause}
             ORDER BY article_code
             LIMIT ?
             """,
@@ -125,6 +133,7 @@ def list_articles(
             f"""
             SELECT article_code, {art_desc} AS article_desc, sco_code, {sco_desc} AS sco_desc
             FROM   articles
+            WHERE  1=1 {history_clause}
             ORDER BY article_code
             LIMIT ?
             """,
